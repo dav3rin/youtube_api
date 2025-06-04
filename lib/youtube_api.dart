@@ -21,6 +21,7 @@ class YoutubeApi {
   String? prevPageToken;
   static const baseURL = 'www.googleapis.com';
   static const searchUnencodedPath = "youtube/v3/search";
+  static const playlistItemsUnencodedPath = "youtube/v3/playlistItems";
   int page = 0;
   final headers = {"Accept": "application/json"};
   YoutubeApi(
@@ -102,6 +103,43 @@ class YoutubeApi {
     return result;
   }
 
+  /// Get videos from a playlist by playlist ID
+  Future<List<YoutubeVideo>> getVideosByPlaylistId(String playlistId,
+      {int maxResults = 50}) async {
+    final url = _getPlaylistItemsUri(playlistId, maxResults: maxResults);
+    var res = await http.get(url, headers: headers);
+    var jsonData = json.decode(res.body) as Map<String, dynamic>;
+
+    if (jsonData['error'] != null) {
+      throw jsonData['error']['message'];
+    }
+
+    if (jsonData['pageInfo']['totalResults'] == null) return <YoutubeVideo>[];
+
+    // Store pagination tokens
+    nextPageToken = jsonData['nextPageToken'];
+    prevPageToken = jsonData['prevPageToken'];
+
+    final items = jsonData['items'] as List;
+    final result = <YoutubeVideo>[];
+
+    // Extract video IDs from playlist items
+    final videoIds = <String>[];
+    for (final item in items) {
+      final videoId = item['snippet']['resourceId']['videoId'] as String?;
+      if (videoId != null) {
+        videoIds.add(videoId);
+      }
+    }
+
+    // Fetch full video details if we have video IDs
+    if (videoIds.isNotEmpty) {
+      return await searchVideosById(videoIds);
+    }
+
+    return result;
+  }
+
   Future<List<ApiResult>> _getResultsFromJson(Map<String, dynamic>? data,
       {bool isSpecificKind = false, int? newPage}) async {
     if (data == null) return <ApiResult>[];
@@ -147,6 +185,80 @@ class YoutubeApi {
         isSpecificKind: isTrendingVideos, newPage: page + 1);
   }
 
+  /// Get next page of videos from a playlist
+  Future<List<YoutubeVideo>?> nextPlaylistPage(String playlistId) async {
+    if (nextPageToken == null) return null;
+    final url = _getPlaylistItemsUri(playlistId, pageToken: nextPageToken);
+    var res = await http.get(url, headers: headers);
+    var jsonData = json.decode(res.body) as Map<String, dynamic>;
+
+    if (jsonData['error'] != null) {
+      throw jsonData['error']['message'];
+    }
+
+    if (jsonData['pageInfo']['totalResults'] == null) return <YoutubeVideo>[];
+
+    // Store pagination tokens
+    nextPageToken = jsonData['nextPageToken'];
+    prevPageToken = jsonData['prevPageToken'];
+    page = page + 1;
+
+    final items = jsonData['items'] as List;
+
+    // Extract video IDs from playlist items
+    final videoIds = <String>[];
+    for (final item in items) {
+      final videoId = item['snippet']['resourceId']['videoId'] as String?;
+      if (videoId != null) {
+        videoIds.add(videoId);
+      }
+    }
+
+    // Fetch full video details if we have video IDs
+    if (videoIds.isNotEmpty) {
+      return await searchVideosById(videoIds);
+    }
+
+    return <YoutubeVideo>[];
+  }
+
+  /// Get previous page of videos from a playlist
+  Future<List<YoutubeVideo>?> prevPlaylistPage(String playlistId) async {
+    if (prevPageToken == null) return null;
+    final url = _getPlaylistItemsUri(playlistId, pageToken: prevPageToken);
+    var res = await http.get(url, headers: headers);
+    var jsonData = json.decode(res.body) as Map<String, dynamic>;
+
+    if (jsonData['error'] != null) {
+      throw jsonData['error']['message'];
+    }
+
+    if (jsonData['pageInfo']['totalResults'] == null) return <YoutubeVideo>[];
+
+    // Store pagination tokens
+    nextPageToken = jsonData['nextPageToken'];
+    prevPageToken = jsonData['prevPageToken'];
+    page = page - 1;
+
+    final items = jsonData['items'] as List;
+
+    // Extract video IDs from playlist items
+    final videoIds = <String>[];
+    for (final item in items) {
+      final videoId = item['snippet']['resourceId']['videoId'] as String?;
+      if (videoId != null) {
+        videoIds.add(videoId);
+      }
+    }
+
+    // Fetch full video details if we have video IDs
+    if (videoIds.isNotEmpty) {
+      return await searchVideosById(videoIds);
+    }
+
+    return <YoutubeVideo>[];
+  }
+
   int get getPage => page;
 
   Uri _getTrendingVideosUri(
@@ -188,6 +300,18 @@ class YoutubeApi {
     Uri url = Uri.https(baseURL, ResultType.playlist.unencodedPath,
         playlistOptions.getMap(key));
     return url;
+  }
+
+  Uri _getPlaylistItemsUri(String playlistId,
+      {int maxResults = 50, String? pageToken}) {
+    final params = {
+      'key': key,
+      'playlistId': playlistId,
+      'part': 'snippet',
+      'maxResults': maxResults.toString(),
+      if (pageToken != null) 'pageToken': pageToken,
+    };
+    return Uri.https(baseURL, playlistItemsUnencodedPath, params);
   }
 
   Uri _getSearchInChannelUri(String channelId, Order? order) {
